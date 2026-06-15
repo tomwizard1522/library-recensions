@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}{{ book.title }} - Электронная библиотека{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        {% if book.cover %}
+        <img src="{{ url_for('static', filename='../uploads/' + book.cover.filename) }}"
+             class="img-fluid rounded shadow" alt="{{ book.title }}">
+        {% else %}
+        <div class="bg-secondary text-white rounded d-flex align-items-center justify-content-center" style="height: 400px;">
+            <i class="fas fa-book fa-5x"></i>
+        </div>
+        {% endif %}
+    </div>
+    <div class="col-md-8">
+        <h1>{{ book.title }}</h1>
+        <p class="text-muted">
+            <strong>Автор:</strong> {{ book.author }}<br>
+            <strong>Год:</strong> {{ book.year }}<br>
+            <strong>Издательство:</strong> {{ book.publisher }}<br>
+            <strong>Страниц:</strong> {{ book.pages }}<br>
+            <strong>Жанры:</strong>
+            {% for genre in book.genres %}
+                <span class="badge bg-secondary">{{ genre.name }}</span>
+            {% endfor %}
+        </p>
+        <div class="mb-3">
+            <h5>Средняя оценка:</h5>
+            <div class="rating h3">
+                {% for i in range(5) %}
+                    {% if i < avg_rating|int %}
+                        <i class="fas fa-star"></i>
+                    {% elif i < avg_rating %}
+                        <i class="fas fa-star-half-alt"></i>
+                    {% else %}
+                        <i class="far fa-star"></i>
+                    {% endif %}
+                {% endfor %}
+                <span class="text-muted fs-6">({{ avg_rating }}/5)</span>
+            </div>
+        </div>
+        <div class="mb-3">
+            <h5>Описание:</h5>
+            <div>{{ render_markdown(book.description)|safe }}</div>
+        </div>
+    </div>
+</div>
+
+<hr>
+
+<!-- Рецензии -->
+<div class="mt-4">
+    <h3>Рецензии</h3>
+
+    {% if can_review %}
+    <div class="mb-4">
+        <a href="{{ url_for('add_review', book_id=book.id) }}" class="btn btn-primary">
+            <i class="fas fa-pen"></i> Написать рецензию
+        </a>
+    </div>
+    {% endif %}
+
+    {% if reviews %}
+        {% for review in reviews %}
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>{{ review.user.full_name }}</strong>
+                        <div class="rating d-inline-block ms-3">
+                            {% for i in range(review.rating) %}
+                                <i class="fas fa-star text-warning"></i>
+                            {% endfor %}
+                            {% for i in range(5 - review.rating) %}
+                                <i class="far fa-star text-warning"></i>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div>
+                        <small class="text-muted me-2">{{ review.created_at.strftime('%d.%m.%Y %H:%M') }}</small>
+                        {% if current_user.is_authenticated and (user_has_role('администратор') or user_has_role('модератор')) %}
+                            <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteReviewModal{{ review.id }}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+
+                            <!-- Модальное окно для удаления рецензии -->
+                            <div class="modal fade" id="deleteReviewModal{{ review.id }}" tabindex="-1">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Удаление рецензии</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <p>Вы уверены, что хотите удалить рецензию пользователя {{ review.user.full_name }}?</p>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Нет</button>
+                                            <form method="POST" action="{{ url_for('delete_review', review_id=review.id) }}" style="display: inline;">
+                                                <button type="submit" class="btn btn-danger">Да</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    {{ render_markdown(review.text)|safe }}
+                </div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="text-muted">Пока нет рецензий. Будьте первым!</p>
+    {% endif %}
+</div>
+{% endblock %}

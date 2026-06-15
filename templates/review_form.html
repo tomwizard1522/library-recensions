@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Написать рецензию - {{ book.title }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h3>Рецензия на книгу "{{ book.title }}"</h3>
+            </div>
+            <div class="card-body">
+                <form method="POST" novalidate>
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.rating.label(class="form-label") }}
+                        {{ form.rating(class="form-select") }}
+                        {% for error in form.rating.errors %}
+                            <div class="text-danger">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.text.label(class="form-label") }}
+                        {{ form.text(class="form-control markdown-editor", required=false, rows=8) }}
+                        {% for error in form.text.errors %}
+                            <div class="text-danger">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Сохранить рецензию
+                        </button>
+                        <a href="{{ url_for('book_detail', book_id=book.id) }}" class="btn btn-secondary">Отмена</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Добавляем принудительную отправку формы при клике на кнопку
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('form');
+        const submitBtn = document.querySelector('button[type="submit"]');
+
+        if (submitBtn) {
+            submitBtn.addEventListener('click', function(e) {
+                // Находим скрытый textarea от EasyMDE и копируем значение
+                const easyMDEInstance = document.querySelector('.EasyMDEContainer');
+                if (easyMDEInstance) {
+                    const codeMirror = easyMDEInstance.querySelector('.CodeMirror');
+                    if (codeMirror && codeMirror.CodeMirror) {
+                        const value = codeMirror.CodeMirror.getValue();
+                        const textarea = document.getElementById('text');
+                        if (textarea) {
+                            textarea.value = value;
+                        }
+                    }
+                }
+
+                // Проверяем, заполнено ли поле
+                const textarea = document.getElementById('text');
+                if (textarea && !textarea.value.trim()) {
+                    e.preventDefault();
+                    alert('Пожалуйста, введите текст рецензии');
+                    return false;
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}
