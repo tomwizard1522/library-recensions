@@ -1,31 +1,30 @@
 import os
 import hashlib
-from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, abort, send_file, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from werkzeug.utils import secure_filename
-from sqlalchemy import func, and_
+from sqlalchemy import func
 import bleach
 import markdown
 import csv
 from io import StringIO, BytesIO
 
-from models import db, User, Role, Book, Genre, Cover, Review, BookViewLog, book_genre
+from models import db, User, Role, Book, Genre, Cover, Review, BookViewLog
 from forms import LoginForm, BookForm, ReviewForm
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-change-this-in-production'
-BASE_DIR = Path(__file__).resolve().parent
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{BASE_DIR}/library.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_TYPE'] = 'filesystem'
 
-# Создаём папку для загрузок, если её нет
+# Конфигурация
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                    'instance', 'library.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+# Создаём необходимые папки
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance'), exist_ok=True)
 
 db.init_app(app)
 login_manager = LoginManager(app)
@@ -39,7 +38,7 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
-# --- Контекстный процессор для ролей в шаблонах ---
+# Контекстный процессор для ролей
 @app.context_processor
 def utility_processor():
     def user_has_role(role_name):
@@ -50,25 +49,17 @@ def utility_processor():
     return dict(user_has_role=user_has_role)
 
 
-# --- Вспомогательные функции ---
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif'}
-
-
+# Вспомогательные функции
 def save_cover(file, book_id):
-    """Сохраняет обложку, проверяет MD5 для избежания дублирования"""
     if not file or file.filename == '':
         return None
 
     file_data = file.read()
     md5_hash = hashlib.md5(file_data).hexdigest()
-
-    # Проверяем, есть ли уже такое изображение
     existing = Cover.query.filter_by(md5_hash=md5_hash).first()
     if existing:
         return existing.id
 
-    # Сохраняем новый файл
     ext = file.filename.rsplit('.', 1)[1].lower()
     filename = f"{md5_hash}.{ext}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -82,13 +73,11 @@ def save_cover(file, book_id):
 
 
 def render_markdown(text):
-    """Преобразует Markdown в HTML с очисткой"""
     clean_text = bleach.clean(text, strip=True)
     return markdown.markdown(clean_text, extensions=['extra', 'codehilite'])
 
 
 def log_book_view(book_id):
-    """Логирует просмотр книги с ограничением 10 в день на пользователя/книгу"""
     user_id = current_user.id if current_user.is_authenticated else None
     today = datetime.now().date()
     today_start = datetime(today.year, today.month, today.day)
@@ -108,23 +97,20 @@ def log_book_view(book_id):
 
 
 def get_average_rating(book_id):
-    """Возвращает среднюю оценку книги"""
     result = db.session.query(func.avg(Review.rating)).filter_by(book_id=book_id).scalar()
     return round(result, 1) if result else 0
 
 
 def get_reviews_count(book_id):
-    """Возвращает количество рецензий на книгу"""
     return Review.query.filter_by(book_id=book_id).count()
 
 
-# --- Маршруты ---
+# Маршруты
 @app.route('/')
 def index():
     page = request.args.get('page', 1, type=int)
     books = Book.query.order_by(Book.year.desc()).paginate(page=page, per_page=10, error_out=False)
 
-    # Популярные книги за последние 3 месяца
     three_months_ago = datetime.now() - timedelta(days=90)
     popular_books = db.session.query(
         Book, func.count(BookViewLog.id).label('views')
@@ -132,18 +118,15 @@ def index():
         .filter(BookViewLog.viewed_at >= three_months_ago) \
         .group_by(Book.id).order_by(func.count(BookViewLog.id).desc()).limit(5).all()
 
-    # Недавно просмотренные для текущего пользователя
     recent_books = []
     if current_user.is_authenticated:
         recent_logs = BookViewLog.query.filter_by(user_id=current_user.id) \
             .order_by(BookViewLog.viewed_at.desc()).limit(5).all()
         recent_books = [log.book for log in recent_logs if log.book]
     else:
-        # Для неаутентифицированных - из сессии
         recent_ids = session.get('recent_books', [])
         if recent_ids:
             recent_books = Book.query.filter(Book.id.in_(recent_ids)).all()
-            # Сохраняем порядок просмотров
             recent_books.sort(key=lambda x: recent_ids.index(x.id) if x.id in recent_ids else 999)
 
     return render_template('index.html',
@@ -159,7 +142,6 @@ def book_detail(book_id):
     book = Book.query.get_or_404(book_id)
     log_book_view(book_id)
 
-    # Сохраняем просмотр для неаутентифицированных в сессии
     if not current_user.is_authenticated:
         recent = session.get('recent_books', [])
         if book_id in recent:
@@ -208,7 +190,6 @@ def add_book():
             db.session.add(book)
             db.session.flush()
 
-            # Добавляем жанры
             for genre_id in form.genres.data:
                 genre = Genre.query.get(genre_id)
                 if genre:
@@ -216,7 +197,6 @@ def add_book():
 
             db.session.commit()
 
-            # Сохраняем обложку
             if form.cover.data:
                 save_cover(form.cover.data, book.id)
 
@@ -250,7 +230,6 @@ def edit_book(book_id):
             book.author = form.author.data
             book.pages = form.pages.data
 
-            # Обновляем жанры
             book.genres = []
             for genre_id in form.genres.data:
                 genre = Genre.query.get(genre_id)
@@ -264,7 +243,6 @@ def edit_book(book_id):
             db.session.rollback()
             flash(f'При сохранении данных возникла ошибка: {str(e)}', 'danger')
     else:
-        # Заполняем форму данными книги
         form.title.data = book.title
         form.description.data = book.description
         form.year.data = book.year
@@ -286,7 +264,6 @@ def delete_book(book_id):
     book = Book.query.get_or_404(book_id)
     title = book.title
 
-    # Удаляем файл обложки
     if book.cover:
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], book.cover.filename)
         if os.path.exists(filepath):
@@ -329,7 +306,6 @@ def add_review(book_id):
     return render_template('review_form.html', form=form, book=book)
 
 
-# --- НОВЫЙ МАРШРУТ: Удаление рецензии (для админа и модератора) ---
 @app.route('/review/delete/<int:review_id>', methods=['POST'])
 @login_required
 def delete_review(review_id):
@@ -382,12 +358,10 @@ def statistics():
     page_actions = request.args.get('page_actions', 1, type=int)
     page_stats = request.args.get('page_stats', 1, type=int)
 
-    # Журнал действий пользователей
     actions_log = BookViewLog.query.order_by(BookViewLog.viewed_at.desc()).paginate(
         page=page_actions, per_page=10, error_out=False
     )
 
-    # Статистика просмотров книг (только аутентифицированные пользователи)
     date_from = request.args.get('date_from')
     date_to = request.args.get('date_to')
 
@@ -438,18 +412,8 @@ def export_csv(export_type):
         writer.writerow(['№', 'ФИО пользователя', 'Название книги', 'Дата и время просмотра'])
         logs = BookViewLog.query.order_by(BookViewLog.viewed_at.desc()).all()
         for i, log in enumerate(logs, 1):
-            # Безопасное получение ФИО
-            if log.user:
-                fio = log.user.full_name
-            else:
-                fio = 'Неаутентифицированный пользователь'
-
-            # Безопасное получение названия книги
-            if log.book:
-                book_title = log.book.title
-            else:
-                book_title = 'Книга удалена'
-
+            fio = log.user.full_name if log.user else 'Неаутентифицированный пользователь'
+            book_title = log.book.title if log.book else 'Книга удалена'
             writer.writerow([i, fio, book_title, log.viewed_at.strftime('%Y-%m-%d %H:%M:%S')])
         filename = f'journal_actions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
 
@@ -482,8 +446,6 @@ def export_csv(export_type):
         abort(404)
 
     output.seek(0)
-
-    # Кодируем в UTF-8 с BOM для правильного отображения в Excel
     output_bytes = output.getvalue().encode('utf-8-sig')
 
     return send_file(
@@ -494,87 +456,49 @@ def export_csv(export_type):
     )
 
 
-# --- Инициализация базы данных ---
+# Инициализация базы данных
 def init_db():
     with app.app_context():
         db.create_all()
 
-        # Добавляем роли
         if Role.query.count() == 0:
             roles = [
-                Role(name='администратор',
-                     description='Имеет полный доступ к системе, может создавать и удалять книги'),
-                Role(name='модератор', description='Может редактировать данные книг и производить модерацию рецензий'),
+                Role(name='администратор', description='Имеет полный доступ к системе'),
+                Role(name='модератор', description='Может редактировать книги и удалять рецензии'),
                 Role(name='пользователь', description='Может оставлять рецензии')
             ]
             db.session.add_all(roles)
             db.session.commit()
-            print('Роли добавлены')
 
-        # Добавляем жанры
         if Genre.query.count() == 0:
-            genres = [
-                Genre(name='Фантастика'),
-                Genre(name='Детектив'),
-                Genre(name='Роман'),
-                Genre(name='Поэзия'),
-                Genre(name='Научная литература'),
-                Genre(name='Приключения'),
-                Genre(name='Исторический роман'),
-                Genre(name='Философия')
-            ]
-            db.session.add_all(genres)
+            genres = ['Фантастика', 'Детектив', 'Роман', 'Поэзия', 'Научная литература', 'Приключения']
+            for g in genres:
+                db.session.add(Genre(name=g))
             db.session.commit()
-            print('Жанры добавлены')
 
-        # Создаём тестового администратора
         if not User.query.filter_by(login='admin').first():
             admin_role = Role.query.filter_by(name='администратор').first()
-            if admin_role:
-                admin = User(
-                    login='admin',
-                    last_name='Иванов',
-                    first_name='Иван',
-                    patronymic='Иванович',
-                    role_id=admin_role.id
-                )
-                admin.set_password('admin123')
-                db.session.add(admin)
-                db.session.commit()
-                print('Администратор создан (логин: admin, пароль: admin123)')
+            admin = User(login='admin', last_name='Иванов', first_name='Иван', patronymic='Иванович',
+                         role_id=admin_role.id)
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
 
-        # Создаём тестового модератора
         if not User.query.filter_by(login='moderator').first():
-            moderator_role = Role.query.filter_by(name='модератор').first()
-            if moderator_role:
-                moderator = User(
-                    login='moderator',
-                    last_name='Сидоров',
-                    first_name='Сидор',
-                    patronymic='Сидорович',
-                    role_id=moderator_role.id
-                )
-                moderator.set_password('mod123')
-                db.session.add(moderator)
-                db.session.commit()
-                print('Модератор создан (логин: moderator, пароль: mod123)')
+            mod_role = Role.query.filter_by(name='модератор').first()
+            moderator = User(login='moderator', last_name='Петров', first_name='Петр', role_id=mod_role.id)
+            moderator.set_password('mod123')
+            db.session.add(moderator)
+            db.session.commit()
 
-        # Создаём тестового пользователя
         if not User.query.filter_by(login='user').first():
             user_role = Role.query.filter_by(name='пользователь').first()
-            if user_role:
-                user = User(
-                    login='user',
-                    last_name='Петров',
-                    first_name='Петр',
-                    role_id=user_role.id
-                )
-                user.set_password('user123')
-                db.session.add(user)
-                db.session.commit()
-                print('Пользователь создан (логин: user, пароль: user123)')
+            user = User(login='user', last_name='Сидоров', first_name='Сидор', role_id=user_role.id)
+            user.set_password('user123')
+            db.session.add(user)
+            db.session.commit()
 
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)
