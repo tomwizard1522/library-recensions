@@ -79,7 +79,8 @@ def render_markdown(text):
 
 def log_book_view(book_id):
     user_id = current_user.id if current_user.is_authenticated else None
-    today = datetime.now().date()
+    now = datetime.now()  # Локальное время
+    today = now.date()
     today_start = datetime(today.year, today.month, today.day)
     today_end = today_start + timedelta(days=1)
 
@@ -111,6 +112,7 @@ def index():
     page = request.args.get('page', 1, type=int)
     books = Book.query.order_by(Book.year.desc()).paginate(page=page, per_page=10, error_out=False)
 
+    # Исправлено: используем datetime.now()
     three_months_ago = datetime.now() - timedelta(days=90)
     popular_books = db.session.query(
         Book, func.count(BookViewLog.id).label('views')
@@ -118,6 +120,7 @@ def index():
         .filter(BookViewLog.viewed_at >= three_months_ago) \
         .group_by(Book.id).order_by(func.count(BookViewLog.id).desc()).limit(5).all()
 
+    # Остальной код без изменений...
     recent_books = []
     if current_user.is_authenticated:
         recent_logs = BookViewLog.query.filter_by(user_id=current_user.id) \
@@ -135,7 +138,6 @@ def index():
                            recent_books=recent_books,
                            get_average_rating=get_average_rating,
                            get_reviews_count=get_reviews_count)
-
 
 @app.route('/book/<int:book_id>')
 def book_detail(book_id):
@@ -379,6 +381,7 @@ def statistics():
 
     if date_to:
         try:
+            # Добавляем 1 день, чтобы включить весь выбранный день
             date_to_obj = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
             query = query.filter(BookViewLog.viewed_at < date_to_obj)
         except ValueError:

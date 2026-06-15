@@ -1,21 +1,10 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime
-import pytz
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
 
-# Часовой пояс Москвы
-MOSCOW_TZ = pytz.timezone('Europe/Moscow')
-
-
-def get_moscow_time():
-    """Возвращает текущее время в Москве"""
-    return datetime.now(MOSCOW_TZ)
-
-
-# Таблица связи многие ко многим (книги - жанры)
 book_genre = db.Table('book_genre',
                       db.Column('book_id', db.Integer, db.ForeignKey('book.id', ondelete='CASCADE'), primary_key=True),
                       db.Column('genre_id', db.Integer, db.ForeignKey('genre.id', ondelete='CASCADE'), primary_key=True)
@@ -27,18 +16,12 @@ class Genre(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
 
-    def __repr__(self):
-        return self.name
-
 
 class Role(db.Model):
     __tablename__ = 'role'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=False)
-
-    def __repr__(self):
-        return self.name
 
 
 class User(db.Model, UserMixin):
@@ -97,7 +80,7 @@ class Review(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
     rating = db.Column(db.Integer, nullable=False)
     text = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=get_moscow_time, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now, nullable=False)  # Исправлено!
     user = db.relationship('User')
 
 
@@ -106,10 +89,6 @@ class BookViewLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     book_id = db.Column(db.Integer, db.ForeignKey('book.id', ondelete='SET NULL'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
-    viewed_at = db.Column(db.DateTime, default=get_moscow_time, nullable=False)
+    viewed_at = db.Column(db.DateTime, default=datetime.now, nullable=False)  # Исправлено!
     book = db.relationship('Book')
     user = db.relationship('User')
-
-    @property
-    def book_title(self):
-        return self.book.title if self.book else "Книга удалена"
