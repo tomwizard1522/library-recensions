@@ -1,4 +1,5 @@
 import os
+import time
 import hashlib
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, abort, send_file, session
@@ -13,6 +14,12 @@ from models import db, User, Role, Book, Genre, Cover, Review, BookViewLog
 from forms import LoginForm, BookForm, ReviewForm
 
 app = Flask(__name__)
+
+os.environ['TZ'] = 'Europe/Moscow'
+try:
+    time.tzset()  # Работает на Unix
+except AttributeError:
+    pass  # Windows игнорирует
 
 # Конфигурация
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
